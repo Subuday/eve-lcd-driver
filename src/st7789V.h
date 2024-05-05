@@ -1,0 +1,8 @@
+#define DISPLAY_NATIVE_WIDTH 240
+#define DISPLAY_NATIVE_HEIGHT 320
+
+#define GPIO_TFT_DATA_CONTROL 25
+#define GPIO_TFT_BACKLIGHT 24 // TODO: Fix GPIO number
+#define GPIO_TFT_RESET_PIN 27
+
+void init_st7789V();
