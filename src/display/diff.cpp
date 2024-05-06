@@ -298,7 +298,6 @@ void DiffFramebuffersToScanlineSpansFastAndCoarse4Wide(uint16_t *framebuffer, ui
   while(y < gpuFrameHeight)
   {
     uint16_t *scanlineStart = (uint16_t *)scanline;
-
     for(int x = 0; x < W;)
     {
       if (scanline[x] != prevScanline[x])

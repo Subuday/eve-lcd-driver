@@ -18,12 +18,14 @@ include_directories(
 		src/display
 		src/lcd_driver
 		src/board
+		src/render
 	)
 
 file(GLOB DIR_SRCS 	*
 					src/*
 					src/display/*
 					src/lcd_driver/*
+					src/render/*
 				)
 
 message(STATUS "Doing a ${CMAKE_BUILD_TYPE} build")
