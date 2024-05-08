@@ -7,6 +7,7 @@
 
 #include "config.h"
 #include "spi.h"
+#include "spi_utils.h"
 #include "util.h"
 #include "mailbox.h"
 #include "mem_alloc.h"
@@ -70,7 +71,7 @@ void RunSPITask(SPITask *task)
   // transitions to let the CS line live. For most other displays, we just set CS line always enabled for the display throughout fbcp-ili9341 lifetime,
   // which is a tiny bit faster.
   // printf("SPI Running Task BEGIN SPI COMMUNICATION!");
-  BEGIN_SPI_COMMUNICATION();
+  begin_spi_communication(spi);
 
   uint8_t *tStart = task->PayloadStart();
   uint8_t *tEnd = task->PayloadEnd();
@@ -98,7 +99,7 @@ void RunSPITask(SPITask *task)
     }
   }
 
-  END_SPI_COMMUNICATION();
+  end_spi_communication(spi);
 }
 
 SharedMemory *spiTaskMemory = 0;
@@ -134,7 +135,7 @@ extern volatile bool programRunning;
 
 void ExecuteSPITasks()
 {
-  BEGIN_SPI_COMMUNICATION();
+  begin_spi_communication(spi);
   {
     while(programRunning && spiTaskMemory->queueTail != spiTaskMemory->queueHead)
     {
@@ -146,7 +147,7 @@ void ExecuteSPITasks()
       }
     }
   }
-  END_SPI_COMMUNICATION();
+  end_spi_communication(spi);
 }
 
 pthread_t spiThread;

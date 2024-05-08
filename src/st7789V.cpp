@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <memory.h>
 #include <spi.h>
+#include <spi_utils.h>
 
 void init_st7789V() {
     // If a Reset pin is defined, toggle it briefly high->low->high to enable the device. Some devices do not have a reset pin, in which case compile with GPIO_TFT_RESET_PIN left undefined.
@@ -18,7 +19,7 @@ void init_st7789V() {
     spi->clk = 34;
     __sync_synchronize();
 
-    BEGIN_SPI_COMMUNICATION();
+    begin_spi_communication(spi);
     usleep(120 * 1000);
 
     SPI_TRANSFER(0x11 /*Sleep Out*/);
@@ -68,7 +69,7 @@ void init_st7789V() {
     ClearScreen();
     usleep(120 * 1000);
 
-    END_SPI_COMMUNICATION();
+    end_spi_communication(spi);
     usleep(120 * 1000); // Delay a bit before restoring CLK, or otherwise this has been observed to cause the display not init if done back to back after the clear operation above.
 
     // And speed up to the desired operation speed finally after init is done.

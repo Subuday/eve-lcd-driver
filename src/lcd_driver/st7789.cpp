@@ -3,6 +3,7 @@
 #if defined(ST7789) || defined(ST7789VW)
 
 #include "spi.h"
+#include "spi_utils.h"
 
 #include <memory.h>
 #include <stdio.h>
@@ -25,7 +26,7 @@ void InitST7789()
   spi->clk = 34;
   __sync_synchronize();
 
-  BEGIN_SPI_COMMUNICATION();
+  begin_spi_communication(spi);
   {
 
     usleep(120 * 1000);
@@ -165,7 +166,7 @@ void InitST7789()
   
   }
 #ifndef USE_DMA_TRANSFERS // For DMA transfers, keep SPI CS & TA active.
-  END_SPI_COMMUNICATION();
+  end_spi_communication(spi);
 #endif
 
   // And speed up to the desired operation speed finally after init is done.

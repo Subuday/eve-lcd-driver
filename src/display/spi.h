@@ -105,17 +105,6 @@ typedef struct __attribute__((packed)) SPITask
   inline uint32_t *DmaSpiHeaderAddress() { return &dmaSpiHeader; }
 } SPITask;
 
-#define BEGIN_SPI_COMMUNICATION() do { spi->cs = BCM2835_SPI0_CS_TA | DISPLAY_SPI_DRIVE_SETTINGS; } while(0)
-#define END_SPI_COMMUNICATION()  do { \
-    uint32_t cs; \
-    while (!(((cs = spi->cs) ^ BCM2835_SPI0_CS_TA) & (BCM2835_SPI0_CS_DONE | BCM2835_SPI0_CS_TA))) /* While TA=1 and DONE=0*/ \
-    { \
-      if ((cs & (BCM2835_SPI0_CS_RXR | BCM2835_SPI0_CS_RXF))) \
-        spi->cs = BCM2835_SPI0_CS_CLEAR_RX | BCM2835_SPI0_CS_TA | DISPLAY_SPI_DRIVE_SETTINGS; \
-    } \
-    spi->cs = BCM2835_SPI0_CS_CLEAR_RX | DISPLAY_SPI_DRIVE_SETTINGS; /* Clear TA and any pending bytes */ \
-  } while(0)
-
 #define WAIT_SPI_FINISHED()  do { \
     uint32_t cs; \
     while (!((cs = spi->cs) & BCM2835_SPI0_CS_DONE)) /* While DONE=0*/ \
