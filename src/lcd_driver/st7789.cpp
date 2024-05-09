@@ -4,6 +4,7 @@
 
 #include "spi.h"
 #include "spi_utils.h"
+#include "gpio_utils.h"
 
 #include <memory.h>
 #include <stdio.h>
@@ -13,12 +14,12 @@ void InitST7789()
   // If a Reset pin is defined, toggle it briefly high->low->high to enable the device. Some devices do not have a reset pin, in which case compile with GPIO_TFT_RESET_PIN left undefined.
 #if defined(GPIO_TFT_RESET_PIN) && GPIO_TFT_RESET_PIN >= 0
   printf("Resetting display at reset GPIO pin %d\n", GPIO_TFT_RESET_PIN);
-  SET_GPIO_MODE(GPIO_TFT_RESET_PIN, 1);
-  SET_GPIO(GPIO_TFT_RESET_PIN);
+  set_gpio_mode(gpio, GPIO_TFT_RESET_PIN, 1);
+  set_gpio(gpio, GPIO_TFT_RESET_PIN);
   usleep(120 * 1000);
-  CLEAR_GPIO(GPIO_TFT_RESET_PIN);
+  clear_gpio(gpio, GPIO_TFT_RESET_PIN);
   usleep(120 * 1000);
-  SET_GPIO(GPIO_TFT_RESET_PIN);
+  set_gpio(gpio, GPIO_TFT_RESET_PIN);
   usleep(120 * 1000);
 #endif
 
@@ -158,8 +159,8 @@ void InitST7789()
 
 #if defined(GPIO_TFT_BACKLIGHT) && defined(BACKLIGHT_CONTROL)
     printf("Setting TFT backlight on at pin %d\n", GPIO_TFT_BACKLIGHT);
-    SET_GPIO_MODE(GPIO_TFT_BACKLIGHT, 0x01); // Set backlight pin to digital 0/1 output mode (0x01) in case it had been PWM controlled
-    SET_GPIO(GPIO_TFT_BACKLIGHT);            // And turn the backlight on.
+    set_gpio_mode(gpio, GPIO_TFT_BACKLIGHT, 0x01); // Set backlight pin to digital 0/1 output mode (0x01) in case it had been PWM controlled
+    set_gpio(gpio, GPIO_TFT_BACKLIGHT);            // And turn the backlight on.
 #endif
 
     ClearScreen();
@@ -177,8 +178,8 @@ void InitST7789()
 void TurnDisplayOff()
 {
 #if defined(GPIO_TFT_BACKLIGHT) && defined(BACKLIGHT_CONTROL)
-  SET_GPIO_MODE(GPIO_TFT_BACKLIGHT, 0x01); // Set backlight pin to digital 0/1 output mode (0x01) in case it had been PWM controlled
-  CLEAR_GPIO(GPIO_TFT_BACKLIGHT);          // And turn the backlight off.
+  set_gpio_mode(gpio, GPIO_TFT_BACKLIGHT, 0x01); // Set backlight pin to digital 0/1 output mode (0x01) in case it had been PWM controlled
+  clear_gpio(gpio, GPIO_TFT_BACKLIGHT); // And turn the backlight off.
 #endif
 #if 0
   QUEUE_SPI_TRANSFER(0x28/*Display OFF*/);
@@ -197,8 +198,8 @@ void TurnDisplayOn()
   QUEUE_SPI_TRANSFER(0x29/*Display ON*/);
 #endif
 #if defined(GPIO_TFT_BACKLIGHT) && defined(BACKLIGHT_CONTROL)
-  SET_GPIO_MODE(GPIO_TFT_BACKLIGHT, 0x01); // Set backlight pin to digital 0/1 output mode (0x01) in case it had been PWM controlled
-  SET_GPIO(GPIO_TFT_BACKLIGHT);            // And turn the backlight on.
+  set_gpio_mode(gpio, GPIO_TFT_BACKLIGHT, 0x01); // Set backlight pin to digital 0/1 output mode (0x01) in case it had been PWM controlled
+  set_gpio(gpio, GPIO_TFT_BACKLIGHT);            // And turn the backlight on.
 #endif
   //  printf("Turned display ON\n");
 }

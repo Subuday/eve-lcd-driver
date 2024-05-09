@@ -64,12 +64,6 @@ typedef struct GPIORegisterFile
 } GPIORegisterFile;
 extern volatile GPIORegisterFile *gpio;
 
-#define SET_GPIO_MODE(pin, mode) gpio->gpfsel[(pin)/10] = (gpio->gpfsel[(pin)/10] & ~(0x7 << ((pin) % 10) * 3)) | ((mode) << ((pin) % 10) * 3)
-#define GET_GPIO_MODE(pin) ((gpio->gpfsel[(pin)/10] & (0x7 << ((pin) % 10) * 3)) >> (((pin) % 10) * 3))
-#define GET_GPIO(pin) (gpio->gplev[0] & (1 << (pin))) // Pin must be (0-31)
-#define SET_GPIO(pin) gpio->gpset[0] = 1 << (pin) // Pin must be (0-31)
-#define CLEAR_GPIO(pin) gpio->gpclr[0] = 1 << (pin) // Pin must be (0-31)
-
 typedef struct SPIRegisterFile
 {
   uint32_t cs;   // SPI Master Control and Status register

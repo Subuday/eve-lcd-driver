@@ -12,6 +12,7 @@
 #include "mailbox.h"
 #include "mem_alloc.h"
 #include "st7789V.h"
+#include "gpio_utils.h"
 
 // Uncomment this to print out all bytes sent to the SPI bus
 // #define DEBUG_SPI_BUS_WRITES
@@ -79,14 +80,14 @@ void RunSPITask(SPITask *task)
   uint8_t *tPrefillEnd = tStart + MIN(15, payloadSize);
 
   // An SPI transfer to the display always starts with one control (command) byte, followed by N data bytes.
-  CLEAR_GPIO(GPIO_TFT_DATA_CONTROL);
+  clear_gpio(gpio, GPIO_TFT_DATA_CONTROL);
 
   // printf("DISPLAY SPI BuS IS NOT 16BITS WIDE!");
   WRITE_FIFO(task->cmd);
 
   while(!(spi->cs & (BCM2835_SPI0_CS_RXD|BCM2835_SPI0_CS_DONE))) /*nop*/;
 
-  SET_GPIO(GPIO_TFT_DATA_CONTROL);
+  set_gpio(gpio, GPIO_TFT_DATA_CONTROL);
 
   {
     while(tStart < tPrefillEnd) WRITE_FIFO(*tStart++);
@@ -198,16 +199,16 @@ int InitSPI()
   printf("BCM core speed: current: %uhz, max turbo: %uhz. SPI CDIV: %d, SPI max frequency: %.0fhz\n", currentBcmCoreSpeed, maxBcmCoreTurboSpeed, SPI_BUS_CLOCK_DIVISOR, (double)maxBcmCoreTurboSpeed / SPI_BUS_CLOCK_DIVISOR);
 
   // By default all GPIO pins are in input mode (0x00), initialize them for SPI and GPIO writes
-  SET_GPIO_MODE(GPIO_TFT_DATA_CONTROL, 0x01); // Data/Control pin to output (0x01)
-  SET_GPIO_MODE(GPIO_SPI0_MISO, 0x04);
-  SET_GPIO_MODE(GPIO_SPI0_MOSI, 0x04);
-  SET_GPIO_MODE(GPIO_SPI0_CLK, 0x04);
+  set_gpio_mode(gpio, GPIO_TFT_DATA_CONTROL, 0x01); // Data/Control pin to output (0x01)
+  set_gpio_mode(gpio, GPIO_SPI0_MISO, 0x04);
+  set_gpio_mode(gpio, GPIO_SPI0_MOSI, 0x04);
+  set_gpio_mode(gpio, GPIO_SPI0_CLK, 0x04);
   // The Adafruit 1.65" 240x240 ST7789 based display is unique compared to others that it does want to see the Chip Select line go
   // low and high to start a new command. For that display we let hardware SPI toggle the CS line, and actually run TA<-0 and TA<-1
   // transitions to let the CS line live. For most other displays, we just set CS line always enabled for the display throughout
   // fbcp-ili9341 lifetime, which is a tiny bit faster.
   printf("Set GPI0 Model CEO into GPIO \n");
-  SET_GPIO_MODE(GPIO_SPI0_CE0, 0x04);
+  set_gpio_mode(gpio, GPIO_SPI0_CE0, 0x04);
 
   spi->cs = BCM2835_SPI0_CS_CLEAR; // Initialize the Control and Status register to defaults: CS=0 (Chip Select), CPHA=0 (Clock Phase), CPOL=0 (Clock Polarity), CSPOL=0 (Chip Select Polarity), TA=0 (Transfer not active), and reset TX and RX queues.
   spi->clk = SPI_BUS_CLOCK_DIVISOR; // Clock Divider determines SPI bus speed, resulting speed=256MHz/clk
@@ -245,13 +246,13 @@ void DeinitSPI()
   spi->cs = BCM2835_SPI0_CS_CLEAR;
 
 #ifdef GPIO_TFT_DATA_CONTROL
-  SET_GPIO_MODE(GPIO_TFT_DATA_CONTROL, 0);
+  set_gpio_mode(gpio, GPIO_TFT_DATA_CONTROL, 0);
 #endif
-  SET_GPIO_MODE(GPIO_SPI0_CE1, 0);
-  SET_GPIO_MODE(GPIO_SPI0_CE0, 0);
-  SET_GPIO_MODE(GPIO_SPI0_MISO, 0);
-  SET_GPIO_MODE(GPIO_SPI0_MOSI, 0);
-  SET_GPIO_MODE(GPIO_SPI0_CLK, 0);
+  set_gpio_mode(gpio, GPIO_SPI0_CE1, 0);
+  set_gpio_mode(gpio, GPIO_SPI0_CE0, 0);
+  set_gpio_mode(gpio, GPIO_SPI0_MISO, 0);
+  set_gpio_mode(gpio, GPIO_SPI0_MOSI, 0);
+  set_gpio_mode(gpio, GPIO_SPI0_CLK, 0);
 
   if (bcm2835)
   {
