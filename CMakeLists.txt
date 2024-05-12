@@ -246,4 +246,4 @@ add_compile_options(-g)
 
 add_executable(fbcp ${DIR_SRCS})
 
-target_link_libraries(fbcp pthread bcm_host atomic gif)
+target_link_libraries(fbcp pthread bcm_host atomic)
