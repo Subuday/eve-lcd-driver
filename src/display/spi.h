@@ -9,6 +9,10 @@
 #include "display.h"
 #include "tick.h"
 #include "display.h"
+#include <mutex>
+
+using namespace std;
+
 
 #define BCM2835_GPIO_BASE                    0x200000   // Address to GPIO register file
 #define BCM2835_SPI0_BASE                    0x204000   // Address to SPI0 register file
@@ -99,54 +103,30 @@ typedef struct __attribute__((packed)) SPITask
   inline uint32_t *DmaSpiHeaderAddress() { return &dmaSpiHeader; }
 } SPITask;
 
-#define WAIT_SPI_FINISHED()  do { \
-    uint32_t cs; \
-    while (!((cs = spi->cs) & BCM2835_SPI0_CS_DONE)) /* While DONE=0*/ \
-    { \
-      if ((cs & (BCM2835_SPI0_CS_RXR | BCM2835_SPI0_CS_RXF))) \
-        spi->cs = BCM2835_SPI0_CS_CLEAR_RX | BCM2835_SPI0_CS_TA | DISPLAY_SPI_DRIVE_SETTINGS; \
-    } \
-  } while(0)
+struct spi_loop {
+  std::mutex mutex;
+  volatile SPIRegisterFile* spi;
+};
+extern spi_loop* loop;
 
 
 // A convenience for defining and dispatching SPI task bytes inline
 #define SPI_TRANSFER(command, ...) do { \
     char data_buffer[] = { __VA_ARGS__ }; \
-    SPITask *t = AllocTask(sizeof(data_buffer)); \
+    SPITask *t = spi_create_task(loop, sizeof(data_buffer)); \
     t->cmd = (command); \
     memcpy(t->data, data_buffer, sizeof(data_buffer)); \
-    CommitTask(t); \
-    RunSPITask(t); \
-    DoneTask(t); \
+    spi_commit_task(loop, t); \
+    spi_run_task(loop, t); \
+    spi_pop_task(loop, t); \
   } while(0)
 
 #define QUEUE_SPI_TRANSFER(command, ...) do { \
     char data_buffer[] = { __VA_ARGS__ }; \
-    SPITask *t = AllocTask(sizeof(data_buffer)); \
+    SPITask *t = spi_create_task(loop, sizeof(data_buffer)); \
     t->cmd = (command); \
     memcpy(t->data, data_buffer, sizeof(data_buffer)); \
-    CommitTask(t); \
-  } while(0)
-
-// Regular 8-bit interface with 16bits wide set cursor commands (most displays)
-#define QUEUE_MOVE_CURSOR_TASK(cursor, pos) do { \
-    SPITask *task = AllocTask(2); \
-    task->cmd = (cursor); \
-    task->data[0] = (pos) >> 8; \
-    task->data[1] = (pos) & 0xFF; \
-    bytesTransferred += 3; \
-    CommitTask(task); \
-  } while(0)
-
-#define QUEUE_SET_WRITE_WINDOW_TASK(cursor, x, endX) do { \
-    SPITask *task = AllocTask(4); \
-    task->cmd = (cursor); \
-    task->data[0] = (x) >> 8; \
-    task->data[1] = (x) & 0xFF; \
-    task->data[2] = (endX) >> 8; \
-    task->data[3] = (endX) & 0xFF; \
-    bytesTransferred += 5; \
-    CommitTask(task); \
+    spi_commit_task(loop, t); \
   } while(0)
 
 typedef struct SharedMemory
@@ -172,61 +152,23 @@ extern volatile int spiThreadSleeping;
 
 extern int mem_fd;
 
-static inline SPITask *AllocTask(uint32_t bytes) // Returns a pointer to a new SPI task block, called on main thread
-{
-  uint32_t bytesToAllocate = sizeof(SPITask) + bytes;// + totalBytesFor9BitTask;
-  uint32_t tail = spiTaskMemory->queueTail;
-  uint32_t newTail = tail + bytesToAllocate;
-  // Is the new task too large to write contiguously into the ring buffer, that it's split into two parts? We never split,
-  // but instead write a sentinel at the end of the ring buffer, and jump the tail back to the beginning of the buffer and
-  // allocate the new task there. However in doing so, we must make sure that we don't write over the head marker.
-  if (newTail + sizeof(SPITask)/*Add extra SPITask size so that there will always be room for eob marker*/ >= SPI_QUEUE_SIZE)
-  {
-    uint32_t head = spiTaskMemory->queueHead;
-    // Write a sentinel, but wait for the head to advance first so that it is safe to write.
-    while(head > tail || head == 0/*Head must move > 0 so that we don't stomp on it*/)
-    {
-      head = spiTaskMemory->queueHead;
-    }
-    SPITask *endOfBuffer = (SPITask*)(spiTaskMemory->buffer + tail);
-    endOfBuffer->cmd = 0; // Use cmd=0x00 to denote "end of buffer, wrap to beginning"
-    __sync_synchronize();
-    spiTaskMemory->queueTail = 0;
-    __sync_synchronize();
-    if (spiTaskMemory->queueHead == tail) syscall(SYS_futex, &spiTaskMemory->queueTail, FUTEX_WAKE, 1, 0, 0, 0); // Wake the SPI thread if it was sleeping to get new tasks
-    tail = 0;
-    newTail = bytesToAllocate;
-  }
+SPITask* spi_create_task(spi_loop* loop, uint32_t bytes);
+void spi_commit_task(spi_loop* loop, SPITask *task); // Advertises the given SPI task from main thread to worker, called on main thread
+void spi_run_tasks(spi_loop* loop);
+static SPITask* spi_front_task(spi_loop* loop);
+void spi_run_task(spi_loop* loop, SPITask *task);
+void spi_pop_task(spi_loop* loop, SPITask *task);
 
-  // If the SPI task queue is full, wait for the SPI thread to process some tasks. This throttles the main thread to not run too fast.
-  uint32_t head = spiTaskMemory->queueHead;
-  while(head > tail && head <= newTail)
-  {
-    usleep(100); // Since the SPI queue is full, we can afford to sleep a bit on the main thread without introducing lag.
-    head = spiTaskMemory->queueHead;
-  }
-
-  SPITask *task = (SPITask*)(spiTaskMemory->buffer + tail);
-  task->size = bytes;
-  return task;
-}
-
-static inline void CommitTask(SPITask *task) // Advertises the given SPI task from main thread to worker, called on main thread
-{
-  __sync_synchronize();
-  uint32_t tail = spiTaskMemory->queueTail;
-  spiTaskMemory->queueTail = (uint32_t)((uint8_t*)task - spiTaskMemory->buffer) + sizeof(SPITask) + task->size;
-  __atomic_fetch_add(&spiTaskMemory->spiBytesQueued, task->PayloadSize()+1, __ATOMIC_RELAXED);
-  __sync_synchronize();
-  if (spiTaskMemory->queueHead == tail) syscall(SYS_futex, &spiTaskMemory->queueTail, FUTEX_WAKE, 1, 0, 0, 0); // Wake the SPI thread if it was sleeping to get new tasks
-}
+void spi_write_fifo(spi_loop* loop, uint8_t word);
 
 #define IN_SINGLE_THREADED_MODE_RUN_TASK() ((void)0)
+
+// #define IN_SINGLE_THREADED_MODE_RUN_TASK() { \
+//   SPITask *t = GetTask(); \
+//   RunSPITask(t); \
+//   DoneTask(t); \
+// }
 
 int InitSPI(void);
 uint8_t st7789_interface_spi_init();
 void DeinitSPI(void);
-void ExecuteSPITasks(void);
-void RunSPITask(SPITask *task);
-SPITask *GetTask(void);
-void DoneTask(SPITask *task);

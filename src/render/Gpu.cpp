@@ -68,6 +68,35 @@ int Gpu::countChangedPixels(uint16_t *framebuffer, uint16_t *prevFramebuffer) {
   return changedPixels;
 }
 
+void Gpu::postDisplayXPositionUpdate(spi_loop* loop, uint16_t position) {
+  SPITask *task = spi_create_task(loop, 2);
+  task->cmd = 0x2A; // CASET
+  task->data[0] = (position) >> 8;
+  task->data[1] = (position) & 0xFF;
+  // bytesTransferred += 3;
+  spi_run_task(loop, task);
+}
+
+void Gpu::postDisplayYPositionUpdate(spi_loop* loop, uint16_t position) {
+  SPITask *task = spi_create_task(loop, 2);
+  task->cmd = 0x2B; // RASET
+  task->data[0] = (position) >> 8;
+  task->data[1] = (position) & 0xFF;
+  // bytesTransferred += 3;
+  spi_run_task(loop, task);
+}
+
+void Gpu::postDisplayXWindowUpdate(spi_loop* loop, uint16_t start, uint16_t end) {
+  SPITask *task = spi_create_task(loop, 4);
+  task->cmd = 0x2A; // CASET
+  task->data[0] = (start) >> 8;
+  task->data[1] = (start) & 0xFF;
+  task->data[2] = (end) >> 8;
+  task->data[3] = (end) & 0xFF;
+  // bytesTransferred += 5;
+  spi_run_task(loop, task);
+}
+
 void Gpu::post(uint16_t* buffer) {
     // memcpy(framebuffer[0], buffer, gpuFramebufferSizeBytes);
 
@@ -131,6 +160,10 @@ void Gpu::post(uint16_t* buffer) {
       }
     }
 
+    if (spiThreadWasWorkingHardBefore) {
+      printf("GPU Thread had too much too work !\n");
+    }
+
     int expiredFrames = 0;
     uint64_t now = tick();
     while (expiredFrames < frameTimeHistorySize && now - frameTimeHistory[expiredFrames].time >= FRAMERATE_HISTORY_LENGTH)
@@ -157,42 +190,14 @@ void Gpu::post(uint16_t* buffer) {
 #endif
 
     int numNewFrames = 1;// __atomic_load_n(&numNewGpuFrames, __ATOMIC_SEQ_CST);
-    usleep(16 * 1000);
+    // usleep(16 * 1000);
     // printf("Got num new frames! %d\n", numNewFrames);
     bool gotNewFramebuffer = true;
     bool framebufferHasNewChangedPixels = true;
     uint64_t frameObtainedTime;
     if (gotNewFramebuffer)
     {
-      //memcpy(framebuffer[0], videoCoreFramebuffer[1], gpuFramebufferSizeBytes);
-      // Assuming gpuFramebufferSizeBytes gives the total size in bytes and each pixel is 2 bytes
-      int numPixels = gpuFramebufferSizeBytes / sizeof(uint16_t);
-      // printf("Draw num pixels %d\n", numPixels);
-      int w2 = 320;  // Framebuffer width in pixels
-      int h2 = 240; // Framebuffer height in pixels
-      uint16_t blueColor = (0 << 11) | (0 << 5) | 31;  // Blue color in 5-6-5 format (max value for blue)
-      startY  += 10; // Start 5 lines above the vertical center
-      if (startY >= 320) {
-        startY = 10;
-      }
-      // for (int i = 0; i < numPixels; ++i) {
-      //   uint16_t blackColor = (0 << 11) | (0 << 5) | 0;  // Black color in 5-6-5 format
-      //   framebuffer[0][i] = blackColor;
-      // }
-      int endY = startY + 10;        // End 5 lines below the vertical center (10 px total)
-      if (inv == 0) {
-        blueColor = (0 << 11) | (0 << 5) | 0;
-        inv = 1;
-      } else {
-        inv = 0;
-      }
-
-      for (int y = startY; y < endY; ++y) {
-          for (int x = 0; x < w2; ++x) {
-              int r = rand() % 2;
-              framebuffer[0][y * w2 + x] = blueColor;
-          }
-      }
+      memcpy(framebuffer[0], buffer, gpuFramebufferSizeBytes);
 
 #ifdef STATISTICS
       uint64_t now = tick();
@@ -236,7 +241,9 @@ void Gpu::post(uint16_t* buffer) {
         DiffFramebuffersToScanlineSpansFastAndCoarse4Wide(framebuffer[0], framebuffer[1], interlacedUpdate, frameParity, head);
       else
 #endif
+        // printf("Frame parity diff frame buffer: %d and interlanced update %d\n", frameParity, interlacedUpdate);
         DiffFramebuffersToScanlineSpansExact(framebuffer[0], framebuffer[1], interlacedUpdate, frameParity, head); // If disabled, or framebuffer width is not compatible, use the exact method
+        // NoDiffChangedRectangle(head);
     }
 
     // Merge spans together on adjacent scanlines - works only if doing a progressive update
@@ -253,17 +260,16 @@ void Gpu::post(uint16_t* buffer) {
         if (spiY != i->y)
         {
           // printf("Must move cursor cursor task!");
-          QUEUE_MOVE_CURSOR_TASK(DISPLAY_SET_CURSOR_Y, displayYOffset + i->y);
+          postDisplayYPositionUpdate(loop, displayYOffset + i->y);
           //printf("\r\n y= %d \r\n",displayYOffset + i->y);
           spiY = i->y;
         }
 
         if (i->endY > i->y + 1 && (spiX != i->x || spiEndX != i->endX)) // Multiline span?
         {
-          QUEUE_SET_WRITE_WINDOW_TASK(DISPLAY_SET_CURSOR_X, displayXOffset + i->x, displayXOffset + i->endX - 1);
+          postDisplayXWindowUpdate(loop, displayXOffset + i->x, displayXOffset + i->endX - 1);
           spiX = i->x;
           spiEndX = i->endX;
-          
         }
         else // Singleline span
         {
@@ -279,7 +285,7 @@ void Gpu::post(uint16_t* buffer) {
                   nextEndX = j->endX;
                 break;
               }
-            QUEUE_SET_WRITE_WINDOW_TASK(DISPLAY_SET_CURSOR_X, displayXOffset + i->x, displayXOffset + nextEndX - 1);
+            postDisplayXWindowUpdate(loop, displayXOffset + i->x, displayXOffset + nextEndX - 1);
             spiX = i->x;
             spiEndX = nextEndX;
           }
@@ -288,14 +294,14 @@ void Gpu::post(uint16_t* buffer) {
               if (spiX != i->x)
               {
                 // printf("Must move cursor task! =0");
-                QUEUE_MOVE_CURSOR_TASK(DISPLAY_SET_CURSOR_X, displayXOffset + i->x);
+                postDisplayXPositionUpdate(loop, displayXOffset + i->x);
                 IN_SINGLE_THREADED_MODE_RUN_TASK();
                 spiX = i->x;
               }
         }
-        // printf("x = %d y = %d\r\n",displayXOffset,displayYOffset);
+
         // Submit the span pixels
-        SPITask *task = AllocTask(i->size * SPI_BYTESPERPIXEL);
+        SPITask *task = spi_create_task(loop, i->size * SPI_BYTESPERPIXEL);
         task->cmd = DISPLAY_WRITE_PIXELS;
 
         bytesTransferred += task->PayloadSize() + 1;
@@ -326,7 +332,7 @@ void Gpu::post(uint16_t* buffer) {
           memcpy(prevScanline + i->x, scanline + i->x, (endX - i->x) * FRAMEBUFFER_BYTESPERPIXEL);
         }
 
-        CommitTask(task);
+        spi_run_task(loop, task);
       }
 
     // Remember where in the command queue this frame ends, to keep track of the SPI thread's progress over it

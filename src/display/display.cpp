@@ -20,14 +20,14 @@ void ClearScreen()
     SPI_TRANSFER(DISPLAY_SET_CURSOR_X, 0, 0, (DISPLAY_WIDTH-1) >> 8, (DISPLAY_WIDTH-1) & 0xFF);
     SPI_TRANSFER(DISPLAY_SET_CURSOR_Y, (uint8_t)(y >> 8), (uint8_t)(y & 0xFF), (DISPLAY_HEIGHT-1) >> 8, (DISPLAY_HEIGHT-1) & 0xFF);
 #endif
-    SPITask *clearLine = AllocTask(DISPLAY_WIDTH*SPI_BYTESPERPIXEL);
+    SPITask *clearLine = spi_create_task(loop, DISPLAY_WIDTH*SPI_BYTESPERPIXEL);
     clearLine->cmd = DISPLAY_WRITE_PIXELS;
     memset(clearLine->data, 0, clearLine->size);
     
-    CommitTask(clearLine);
-    RunSPITask(clearLine);
+    spi_commit_task(loop, clearLine);
+    spi_run_task(loop, clearLine);
     
-    DoneTask(clearLine);
+    spi_pop_task(loop, clearLine);
   }
   
 #ifdef DISPLAY_SPI_BUS_IS_16BITS_WIDE

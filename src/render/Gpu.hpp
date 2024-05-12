@@ -54,9 +54,6 @@ class Gpu {
 
         bool displayOff = false;
 
-        int startY = 10;
-        int inv = 0;
-
         uint16_t* framebuffer[2];
 
         uint32_t curFrameEnd;
@@ -67,6 +64,11 @@ class Gpu {
         int frameParity = 0;           // For interlaced frame updates, this is either 0 or 1 to denote evens or odds.
 
         int countChangedPixels(uint16_t *framebuffer, uint16_t *prevFramebuffer);
+
+        void postDisplayXPositionUpdate(spi_loop* loop, uint16_t position);
+        void postDisplayYPositionUpdate(spi_loop* loop, uint16_t position);
+
+        void postDisplayXWindowUpdate(spi_loop* loop, uint16_t start, uint16_t end);
     public:
         Gpu();
         void init();

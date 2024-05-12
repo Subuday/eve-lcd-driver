@@ -26,16 +26,8 @@
 #define DEBUG_PRINT_WRITTEN_BYTE(byte) ((void)0)
 #endif
 
-#define TOGGLE_CHIP_SELECT_LINE() ((void)0)
 
 static uint32_t writeCounter = 0;
-
-#define WRITE_FIFO(word) do { \
-  uint8_t w = (word); \
-  spi->fifo = w; \
-  TOGGLE_CHIP_SELECT_LINE(); \
-  DEBUG_PRINT_WRITTEN_BYTE(w); \
-  } while(0)
 
 int mem_fd = -1;
 volatile void *bcm2835 = 0;
@@ -52,6 +44,57 @@ volatile uint64_t *systemTimerRegister = 0;
 // https://www.raspberrypi.org/forums/viewtopic.php?f=44&t=181154
 #define UNLOCK_FAST_8_CLOCKS_SPI() (spi->dlen = 2)
 
+SPITask* spi_create_task(spi_loop* loop, uint32_t bytes) {
+  printf("SPI Task allocated with number of bytes %d: \n", bytes);
+  uint32_t bytesToAllocate = sizeof(SPITask) + bytes;// + totalBytesFor9BitTask;
+  uint32_t tail = spiTaskMemory->queueTail;
+  uint32_t newTail = tail + bytesToAllocate;
+  // Is the new task too large to write contiguously into the ring buffer, that it's split into two parts? We never split,
+  // but instead write a sentinel at the end of the ring buffer, and jump the tail back to the beginning of the buffer and
+  // allocate the new task there. However in doing so, we must make sure that we don't write over the head marker.
+  if (newTail + sizeof(SPITask)/*Add extra SPITask size so that there will always be room for eob marker*/ >= SPI_QUEUE_SIZE)
+  {
+    printf("SPI Task allocated with overhead!\n");
+    uint32_t head = spiTaskMemory->queueHead;
+    // Write a sentinel, but wait for the head to advance first so that it is safe to write.
+    while(head > tail || head == 0/*Head must move > 0 so that we don't stomp on it*/)
+    {
+      head = spiTaskMemory->queueHead;
+    }
+    SPITask *endOfBuffer = (SPITask*)(spiTaskMemory->buffer + tail);
+    endOfBuffer->cmd = 0; // Use cmd=0x00 to denote "end of buffer, wrap to beginning"
+    __sync_synchronize();
+    spiTaskMemory->queueTail = 0;
+    __sync_synchronize();
+    if (spiTaskMemory->queueHead == tail) syscall(SYS_futex, &spiTaskMemory->queueTail, FUTEX_WAKE, 1, 0, 0, 0); // Wake the SPI thread if it was sleeping to get new tasks
+    tail = 0;
+    newTail = bytesToAllocate;
+  }
+
+  // If the SPI task queue is full, wait for the SPI thread to process some tasks. This throttles the main thread to not run too fast.
+  uint32_t head = spiTaskMemory->queueHead;
+  while(head > tail && head <= newTail)
+  {
+    usleep(100); // Since the SPI queue is full, we can afford to sleep a bit on the main thread without introducing lag.
+    head = spiTaskMemory->queueHead;
+  }
+
+  SPITask *task = (SPITask*)(spiTaskMemory->buffer + tail);
+  task->size = bytes;
+  return task;
+}
+
+//TODO: Remove unnessery synchr code
+void spi_commit_task(spi_loop* loop, SPITask *task) {
+  lock_guard<mutex> guard(loop->mutex);
+  __sync_synchronize();
+  uint32_t tail = spiTaskMemory->queueTail;
+  spiTaskMemory->queueTail = (uint32_t)((uint8_t*)task - spiTaskMemory->buffer) + sizeof(SPITask) + task->size;
+  __atomic_fetch_add(&spiTaskMemory->spiBytesQueued, task->PayloadSize()+1, __ATOMIC_RELAXED);
+  __sync_synchronize();
+  if (spiTaskMemory->queueHead == tail) syscall(SYS_futex, &spiTaskMemory->queueTail, FUTEX_WAKE, 1, 0, 0, 0); // Wake the SPI thread if it was sleeping to get new tasks
+}
+
 void WaitForPolledSPITransferToFinish()
 {
   uint32_t cs;
@@ -62,9 +105,7 @@ void WaitForPolledSPITransferToFinish()
   if ((cs & BCM2835_SPI0_CS_RXD)) spi->cs = BCM2835_SPI0_CS_CLEAR_RX | BCM2835_SPI0_CS_TA;
 }
 
-
-void RunSPITask(SPITask *task)
-{
+void spi_run_task(spi_loop* loop, SPITask *task) {
   WaitForPolledSPITransferToFinish();
 
   // The Adafruit 1.65" 240x240 ST7789 based display is unique compared to others that it does want to see the Chip Select line go
@@ -83,18 +124,18 @@ void RunSPITask(SPITask *task)
   clear_gpio(gpio, GPIO_TFT_DATA_CONTROL);
 
   // printf("DISPLAY SPI BuS IS NOT 16BITS WIDE!");
-  WRITE_FIFO(task->cmd);
+  spi_write_fifo(loop, task->cmd);
 
   while(!(spi->cs & (BCM2835_SPI0_CS_RXD|BCM2835_SPI0_CS_DONE))) /*nop*/;
 
   set_gpio(gpio, GPIO_TFT_DATA_CONTROL);
 
   {
-    while(tStart < tPrefillEnd) WRITE_FIFO(*tStart++);
+    while(tStart < tPrefillEnd) spi_write_fifo(loop, *tStart++);
     while(tStart < tEnd)
     {
       uint32_t cs = spi->cs;
-      if ((cs & BCM2835_SPI0_CS_TXD)) WRITE_FIFO(*tStart++);
+      if ((cs & BCM2835_SPI0_CS_TXD)) spi_write_fifo(loop, *tStart++);
 // TODO:      else asm volatile("yield");
       if ((cs & (BCM2835_SPI0_CS_RXR|BCM2835_SPI0_CS_RXF))) spi->cs = BCM2835_SPI0_CS_CLEAR_RX | BCM2835_SPI0_CS_TA;
     }
@@ -108,9 +149,10 @@ volatile uint64_t spiThreadIdleUsecs = 0;
 volatile uint64_t spiThreadSleepStartTime = 0;
 volatile int spiThreadSleeping = 0;
 double spiUsecsPerByte;
+spi_loop* loop = nullptr;
 
-SPITask *GetTask() // Returns the first task in the queue, called in worker thread
-{
+static SPITask* spi_front_task(spi_loop* loop) {
+  lock_guard<mutex> guard(loop->mutex);
   uint32_t head = spiTaskMemory->queueHead;
   uint32_t tail = spiTaskMemory->queueTail;
   if (head == tail) return 0;
@@ -125,8 +167,8 @@ SPITask *GetTask() // Returns the first task in the queue, called in worker thre
   return task;
 }
 
-void DoneTask(SPITask *task) // Frees the first SPI task from the queue, called in worker thread
-{
+void spi_pop_task(spi_loop* loop, SPITask* task) {
+  lock_guard<mutex> guard(loop->mutex);
   __atomic_fetch_sub(&spiTaskMemory->spiBytesQueued, task->PayloadSize()+1, __ATOMIC_RELAXED);
   spiTaskMemory->queueHead = (uint32_t)((uint8_t*)task - spiTaskMemory->buffer) + sizeof(SPITask) + task->size;
   __sync_synchronize();
@@ -134,21 +176,25 @@ void DoneTask(SPITask *task) // Frees the first SPI task from the queue, called 
 
 extern volatile bool programRunning;
 
-void ExecuteSPITasks()
-{
+void spi_run_tasks(spi_loop* loop) {
   begin_spi_communication(spi);
   {
     while(programRunning && spiTaskMemory->queueTail != spiTaskMemory->queueHead)
     {
-      SPITask *task = GetTask();
+      SPITask *task = spi_front_task(loop);
       if (task)
       {
-        RunSPITask(task);
-        DoneTask(task);
+        spi_run_task(loop, task);
+        spi_pop_task(loop, task);
       }
     }
   }
   end_spi_communication(spi);
+}
+
+void spi_write_fifo(spi_loop* loop, uint8_t word) {
+  loop->spi->fifo = word;
+  DEBUG_PRINT_WRITTEN_BYTE(w);
 }
 
 pthread_t spiThread;
@@ -161,7 +207,7 @@ void *spi_thread(void *unused)
   {
     if (spiTaskMemory->queueTail != spiTaskMemory->queueHead)
     {
-      ExecuteSPITasks();
+      spi_run_tasks(loop);
     }
     else
     {
@@ -207,7 +253,6 @@ int InitSPI()
   // low and high to start a new command. For that display we let hardware SPI toggle the CS line, and actually run TA<-0 and TA<-1
   // transitions to let the CS line live. For most other displays, we just set CS line always enabled for the display throughout
   // fbcp-ili9341 lifetime, which is a tiny bit faster.
-  printf("Set GPI0 Model CEO into GPIO \n");
   set_gpio_mode(gpio, GPIO_SPI0_CE0, 0x04);
 
   spi->cs = BCM2835_SPI0_CS_CLEAR; // Initialize the Control and Status register to defaults: CS=0 (Chip Select), CPHA=0 (Clock Phase), CPOL=0 (Clock Polarity), CSPOL=0 (Chip Select Polarity), TA=0 (Transfer not active), and reset TX and RX queues.
@@ -217,6 +262,13 @@ int InitSPI()
 
   spiTaskMemory = (SharedMemory*)Malloc(SHARED_MEMORY_SIZE, "spi.cpp shared task memory");
   spiTaskMemory->queueHead = spiTaskMemory->queueTail = spiTaskMemory->spiBytesQueued = 0;
+  printf("SPI Loop is under creating!\n");
+  loop = new spi_loop(); //(spi_loop*)Malloc(sizeof(spi_loop), "spi loop");
+  loop->spi = spi;
+  printf("SPI LOOP is created\n");
+  if (loop == nullptr) {
+    printf("SPI LOOP IS NOT CREATED!\n");
+  }
 
   // Enable fast 8 clocks per byte transfer mode, instead of slower 9 clocks per byte.
   UNLOCK_FAST_8_CLOCKS_SPI();
