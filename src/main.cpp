@@ -28,10 +28,22 @@
 #include "diff.h"
 #include "mem_alloc.h"
 #include <Gpu.hpp>
+#include <Vsync.hpp>
 
 #include <stdlib.h>  // For random number generation
 #include <stdint.h>  // For uint16_t and other standard integer types
 #include <time.h>    // For seeding the random number generator with time
+
+#include <iostream>
+#include <gif_lib.h>
+#include <vector>
+#include <functional>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 
 int startY = 10;
 int inv = 0;
@@ -71,9 +83,22 @@ const char *SignalToString(int signal)
   return "?";
 }
 
+using namespace std;
+
+mutex mtx;
+condition_variable cv;
+queue<function<void()>> q;
+
+void post(const function<void()>& callback) {
+  unique_lock<mutex> lock(mtx);
+  q.push(callback);
+  cv.notify_one();
+}
+
 void MarkProgramQuitting()
 {
   programRunning = false;
+  post([]{});
 }
 
 void ProgramInterruptHandler(int signal)
@@ -107,22 +132,109 @@ int main()
   signal(SIGUSR1, ProgramInterruptHandler);
   signal(SIGUSR2, ProgramInterruptHandler);
   signal(SIGTERM, ProgramInterruptHandler);
-
+  
   Gpu gpu;
   gpu.init();
 
-  while (programRunning) {
-    const size_t size = 320 * 240 * sizeof(uint16_t);  // Example size calculation for a framebuffer
-    uint16_t* sourceBuffer = new uint16_t[320 * 240];   // Example source buffer, assuming it matches the dimensions of a single framebuffer
+  Vsync vsync;
+  vsync.callback([]{
+    post([]{});
+  });
+  vsync.start();
 
-    // Optionally initialize sourceBuffer, as an example, fill with some data
-    for (int i = 0; i < 320 * 240; ++i) {
-      sourceBuffer[i] = static_cast<uint16_t>(i % 65536);  // Example data
+  int width = 320;
+  int height = 240;
+  int channels = 3;
+
+  uint16_t sourceBuffer[height][width];
+
+  int f = 0;
+
+  while (programRunning) {
+    //unique_lock<mutex> lock(mtx);
+    // cv.wait(lock, [] { return !q.empty(); });
+    // function<void()> cb = q.front();
+    // q.pop();
+    // lock.unlock();
+
+    // cb();
+
+    std::string path = "../res/disappearing/frame_" + std::to_string(f) + ".bmp";
+    unsigned char *data = stbi_load(path.c_str(), &width, &height, &channels, 0);
+    if (f == 180) {
+      f = 0;
+    }
+    f += 1;
+
+    printf("Drawing frame %d\n", f);
+
+    for (int h = 0; h < height; h++) {
+      for (int w = 0; w < width; w++) {
+        sourceBuffer[h][w] = (0 << 11) | (0 << 5) | 0;
+      }
     }
 
-    gpu.post(sourceBuffer);
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+          unsigned char* pixel = data + (y * width + x) * channels;
+          unsigned char red = pixel[0];
+          unsigned char green = pixel[1];
+          unsigned char blue = pixel[2];
 
-    delete sourceBuffer;
+          uint8_t r = (red >> 3) & 0x1F;   // Reduce to 5 bits
+          uint8_t g = (green >> 2) & 0x3F; // Reduce to 6 bits
+          uint8_t b = (blue >> 3) & 0x1F;  // Reduce to 5 bits
+
+          uint16_t rgb16 = (r << 11) | (g << 5) | b;
+
+          sourceBuffer[y][x] = rgb16;
+          
+      }
+    }
+
+    stbi_image_free(data);
+
+    uint16_t tempBuffer[320][240];
+    for (int i = 0; i < 240; ++i) {
+        for (int j = 0; j < 320; ++j) {
+            tempBuffer[j][240 - 1 - i] = sourceBuffer[i][j];
+        }
+    }
+
+    uint16_t destinationBuffer[320][240];
+    for (int i = 0; i < 320; ++i) {
+      for (int j = 0; j < 240; ++j) {
+        destinationBuffer[i][240 - 1 - j] = tempBuffer[i][j];
+      }
+    }
+
+      // uint16_t blueColor = (0 << 11) | (0 << 5) | 31;  // Blue color in 5-6-5 format (max value for blue)
+      // startY  += 10; // Start 5 lines above the vertical center
+      // if (startY >= 320) {
+      //   startY = 10;
+      // }
+
+      // int endY = startY + 10;        // End 5 lines below the vertical center (10 px total)
+      // if (inv == 0) {
+      //   blueColor = (0 << 11) | (0 << 5) | 0;
+      //   inv = 1;
+      // } else {
+      //   inv = 0;
+      // }
+
+      // for (int y = startY; y < endY; ++y) {
+      //     for (int x = 0; x < width; ++x) {
+      //       int r = rand() % 2;
+      //       sourceBuffer[y * width + x] = (0 << 11) | (0 << 5) | 0;
+      //     }
+      // }
+
+    // for (int i = 0; i < height * width; i++) {
+    //   sourceBuffer[i] = (0 << 11) | (0 << 5) | 31;
+    // }
+
+    gpu.post(&destinationBuffer[0][0]);
+    usleep(16 * 1000);
   }
 
   gpu.deinit();
@@ -444,7 +556,7 @@ int main()
 //           memcpy(prevScanline + i->x, scanline + i->x, (endX - i->x) * FRAMEBUFFER_BYTESPERPIXEL);
 //         }
 
-//         CommitTask(task);
+//         spi_commit_task(loop, task);
 //       }
 
 //     // Remember where in the command queue this frame ends, to keep track of the SPI thread's progress over it
