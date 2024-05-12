@@ -19,6 +19,8 @@ include_directories(
 		src/lcd_driver
 		src/board
 		src/render
+		src/spi
+		src/gpio/
 	)
 
 file(GLOB DIR_SRCS 	*
@@ -26,6 +28,8 @@ file(GLOB DIR_SRCS 	*
 					src/display/*
 					src/lcd_driver/*
 					src/render/*
+					src/spi/*
+					src/gpio/*
 				)
 
 message(STATUS "Doing a ${CMAKE_BUILD_TYPE} build")
@@ -242,4 +246,4 @@ add_compile_options(-g)
 
 add_executable(fbcp ${DIR_SRCS})
 
-target_link_libraries(fbcp pthread bcm_host atomic)
+target_link_libraries(fbcp pthread bcm_host atomic gif)
