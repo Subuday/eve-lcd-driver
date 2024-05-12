@@ -20,6 +20,7 @@ void init_st7789V() {
     spi->clk = 34;
     __sync_synchronize();
 
+    printf("Driver begin spi communication!\n");
     begin_spi_communication(spi);
     usleep(120 * 1000);
 
@@ -53,7 +54,14 @@ void init_st7789V() {
 
     // TODO: The 0xB1 command is not Frame Rate Control for ST7789VW, 0xB3 is (add support to it)
     // Frame rate = 850000 / [ (2*RTNA+40) * (162 + FPA+BPA)]
-    // SPI_TRANSFER(0xB1 /*FRMCTR1:Frame Rate Control*/, /*RTNA=*/6, /*FPA=*/1, /*BPA=*/1); // This should set frame rate = 99.67 Hz
+    // SPI_TRANSFER(0xB3 /*FRMCTR1:Frame Rate Control*/, /*RTNA=*/6, /*FPA=*/1, /*BPA=*/1); // This should set frame rate = 99.67 Hz
+    // usleep(120 * 1000);
+
+    SPI_TRANSFER(0xC6, 0x01);
+    usleep(20 * 1000);
+
+    // SPI_TRANSFER(0x34);
+    // usleep(20 * 1000);
 
     SPI_TRANSFER(/*Display ON*/ 0x29);
     usleep(120 * 1000);
@@ -75,4 +83,6 @@ void init_st7789V() {
 
     // And speed up to the desired operation speed finally after init is done.
     spi->clk = SPI_BUS_CLOCK_DIVISOR;
+
+    printf("Driver is initialised!\n");
 }
