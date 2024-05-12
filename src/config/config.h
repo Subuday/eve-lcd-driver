@@ -132,7 +132,7 @@
 // so enabled by default. If your display is very constrained on SPI bus speed, and don't mind increased
 // CPU consumption, comment this out to use the precise algorithm.
 #if !defined(ALL_TASKS_SHOULD_DMA) // At the moment the coarse method is not good at producing long spans, so disable if all tasks should DMA
-#define FAST_BUT_COARSE_PIXEL_DIFF
+// #define FAST_BUT_COARSE_PIXEL_DIFF
 #endif
 
 #if defined(ALL_TASKS_SHOULD_DMA)
