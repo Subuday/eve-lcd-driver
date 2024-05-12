@@ -35,7 +35,7 @@
 #include <time.h>    // For seeding the random number generator with time
 
 #include <iostream>
-#include <gif_lib.h>
+// #include <gif_lib.h>
 #include <vector>
 #include <functional>
 
@@ -159,9 +159,9 @@ int main()
 
     // cb();
 
-    std::string path = "../res/disappearing/frame_" + std::to_string(f) + ".bmp";
+    std::string path = "../res/speaking/frame_" + std::to_string(f) + ".bmp";
     unsigned char *data = stbi_load(path.c_str(), &width, &height, &channels, 0);
-    if (f == 180) {
+    if (f == 165) {
       f = 0;
     }
     f += 1;

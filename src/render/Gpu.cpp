@@ -74,7 +74,7 @@ void Gpu::postDisplayXPositionUpdate(spi_loop* loop, uint16_t position) {
   task->data[0] = (position) >> 8;
   task->data[1] = (position) & 0xFF;
   // bytesTransferred += 3;
-  spi_run_task(loop, task);
+  spi_commit_task(loop, task);
 }
 
 void Gpu::postDisplayYPositionUpdate(spi_loop* loop, uint16_t position) {
@@ -83,7 +83,7 @@ void Gpu::postDisplayYPositionUpdate(spi_loop* loop, uint16_t position) {
   task->data[0] = (position) >> 8;
   task->data[1] = (position) & 0xFF;
   // bytesTransferred += 3;
-  spi_run_task(loop, task);
+  spi_commit_task(loop, task);
 }
 
 void Gpu::postDisplayXWindowUpdate(spi_loop* loop, uint16_t start, uint16_t end) {
@@ -94,7 +94,7 @@ void Gpu::postDisplayXWindowUpdate(spi_loop* loop, uint16_t start, uint16_t end)
   task->data[2] = (end) >> 8;
   task->data[3] = (end) & 0xFF;
   // bytesTransferred += 5;
-  spi_run_task(loop, task);
+  spi_commit_task(loop, task);
 }
 
 void Gpu::post(uint16_t* buffer) {
@@ -332,7 +332,7 @@ void Gpu::post(uint16_t* buffer) {
           memcpy(prevScanline + i->x, scanline + i->x, (endX - i->x) * FRAMEBUFFER_BYTESPERPIXEL);
         }
 
-        spi_run_task(loop, task);
+        spi_commit_task(loop, task);
       }
 
     // Remember where in the command queue this frame ends, to keep track of the SPI thread's progress over it
