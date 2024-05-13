@@ -45,7 +45,7 @@ volatile uint64_t *systemTimerRegister = 0;
 #define UNLOCK_FAST_8_CLOCKS_SPI() (spi->dlen = 2)
 
 SPITask* spi_create_task(spi_loop* loop, uint32_t bytes) {
-  printf("SPI Task allocated with number of bytes %d: \n", bytes);
+  // printf("SPI Task allocated with number of bytes %d: \n", bytes);
   uint32_t bytesToAllocate = sizeof(SPITask) + bytes;// + totalBytesFor9BitTask;
   uint32_t tail = spiTaskMemory->queueTail;
   uint32_t newTail = tail + bytesToAllocate;

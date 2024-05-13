@@ -151,13 +151,13 @@ int main()
   int f = 0;
 
   while (programRunning) {
-    //unique_lock<mutex> lock(mtx);
-    // cv.wait(lock, [] { return !q.empty(); });
-    // function<void()> cb = q.front();
-    // q.pop();
-    // lock.unlock();
+    unique_lock<mutex> lock(mtx);
+    cv.wait(lock, [] { return !q.empty(); });
+    function<void()> cb = q.front();
+    q.pop();
+    lock.unlock();
 
-    // cb();
+    cb();
 
     std::string path = "../res/speaking/frame_" + std::to_string(f) + ".bmp";
     unsigned char *data = stbi_load(path.c_str(), &width, &height, &channels, 0);
@@ -234,7 +234,7 @@ int main()
     // }
 
     gpu.post(&destinationBuffer[0][0]);
-    usleep(16 * 1000);
+    // usleep(16 * 1000);
   }
 
   gpu.deinit();
