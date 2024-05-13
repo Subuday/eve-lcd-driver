@@ -64,6 +64,9 @@ class Gpu {
         int frameParity = 0;           // For interlaced frame updates, this is either 0 or 1 to denote evens or odds.
 
         int countChangedPixels(uint16_t *framebuffer, uint16_t *prevFramebuffer);
+        
+        void createSpans(Span*& head, uint16_t* framebuffer, uint16_t* prevFramebuffer, bool interlacedDiff, int interlacedFieldParity);
+        void optimizeSpans(Span* head);
 
         void postDisplayXPositionUpdate(spi_loop* loop, uint16_t position);
         void postDisplayYPositionUpdate(spi_loop* loop, uint16_t position);
