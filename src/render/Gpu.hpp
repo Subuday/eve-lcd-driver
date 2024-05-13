@@ -29,6 +29,7 @@
 #include "mailbox.h"
 #include "diff.h"
 #include "mem_alloc.h"
+#include <st7789V.h>
 
 class Gpu {
 

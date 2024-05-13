@@ -376,103 +376,95 @@ void Gpu::post(uint16_t* buffer) {
     int bytesTransferred = 0;
     Span *head = 0;
 
-    // Collect all spans in this image
-    if (framebufferHasNewChangedPixels || prevFrameWasInterlacedUpdate)
-    {
-      // If possible, utilize a faster 4-wide pixel diffing method
+    if (framebufferHasNewChangedPixels || prevFrameWasInterlacedUpdate) {
         createSpans(head, framebuffer[0], framebuffer[1], interlacedUpdate, frameParity);
         // NoDiffChangedRectangle(head);
-    }
 
-    // Merge spans together on adjacent scanlines - works only if doing a progressive update
-    if (!interlacedUpdate) {
-      optimizeSpans(head);
+        // Merge spans together on adjacent scanlines - works only if doing a progressive update
+        if (!interlacedUpdate) {
+          optimizeSpans(head);
+        }
     }
-
     
     // Submit spans
-    if (!displayOff)
-      for (Span *i = head; i; i = i->next)
-      {
-        // printf("Span update the write cursor\n");
-        // Update the write cursor if needed
-        if (spiY != i->y)
-        {
-          // printf("Must move cursor cursor task!");
+    if (!displayOff) {
+      for (Span *i = head; i; i = i->next) {
+        if (spiY != i->y) {
           postDisplayYPositionUpdate(loop, displayYOffset + i->y);
-          //printf("\r\n y= %d \r\n",displayYOffset + i->y);
           spiY = i->y;
         }
 
-        if (i->endY > i->y + 1 && (spiX != i->x || spiEndX != i->endX)) // Multiline span?
-        {
+        if (i->endY > i->y + 1 && (spiX != i->x || spiEndX != i->endX)) { // Multiline span
           postDisplayXWindowUpdate(loop, displayXOffset + i->x, displayXOffset + i->endX - 1);
           spiX = i->x;
           spiEndX = i->endX;
-        }
-        else // Singleline span
-        {
-          if (spiEndX < i->endX) // Need to push the X end window?
-          {
+        } else { // Singleline span
+          if (spiEndX < i->endX) { // Update X end window
             // We are doing a single line span and need to increase the X window. If possible,
             // peek ahead to cater to the next multiline span update if that will be compatible.
+            
+            // TODO: Optimize next end x, cause looks like it has mistake, if next single line span end x is greater than 
+            // the next multiline span end x, it will lead to unnessary update
             int nextEndX = gpuFrameWidth;
-            for (Span *j = i->next; j; j = j->next)
-              if (j->endY > j->y + 1)
-              {
-                if (j->endX >= i->endX)
+            for (Span *j = i->next; j; j = j->next) {
+              if (j->endY > j->y + 1) {
+                if (j->endX >= i->endX) {
                   nextEndX = j->endX;
+                }
                 break;
               }
+            }
             postDisplayXWindowUpdate(loop, displayXOffset + i->x, displayXOffset + nextEndX - 1);
             spiX = i->x;
             spiEndX = nextEndX;
+          } else {
+            if (spiX != i->x) { // Update X start window
+              postDisplayXPositionUpdate(loop, displayXOffset + i->x);
+              spiX = i->x;
+            }
           }
-          else
-              // printf("Display write pixels cmd does not reset write cursor!");
-              if (spiX != i->x)
-              {
-                // printf("Must move cursor task! =0");
-                postDisplayXPositionUpdate(loop, displayXOffset + i->x);
-                IN_SINGLE_THREADED_MODE_RUN_TASK();
-                spiX = i->x;
-              }
         }
 
-        // Submit the span pixels
         SPITask *task = spi_create_task(loop, i->size * SPI_BYTESPERPIXEL);
         task->cmd = DISPLAY_WRITE_PIXELS;
 
-        bytesTransferred += task->PayloadSize() + 1;
+        bytesTransferred += task->PayloadSize() + 1; // + command byte
+        
         uint16_t *scanline = framebuffer[0] + i->y * (gpuFramebufferScanlineStrideBytes >> 1);
         uint16_t *prevScanline = framebuffer[1] + i->y * (gpuFramebufferScanlineStrideBytes >> 1);
 
-
-        uint16_t *data = (uint16_t *)task->data;
-        for (int y = i->y; y < i->endY; ++y, scanline += gpuFramebufferScanlineStrideBytes >> 1, prevScanline += gpuFramebufferScanlineStrideBytes >> 1)
-        {
+        uint16_t *data = (uint16_t*) task->data;
+        for (int y = i->y; y < i->endY; ++y, scanline += gpuFramebufferScanlineStrideBytes >> 1, prevScanline += gpuFramebufferScanlineStrideBytes >> 1) {
           int endX = (y + 1 == i->endY) ? i->lastScanEndX : i->endX;
           int x = i->x;
 
-          while (x < endX && (x & 1))
-            *data++ = __builtin_bswap16(scanline[x++]);
+          while (x < endX && (x % 2 != 0)) {
+            // Big Endian to Little Endian ?
+            *data = __builtin_bswap16(scanline[x]);
+            data += 1;
+            x += 1;
+          }
+
           while (x < (endX & ~1U))
           {
-            uint32_t u = *(uint32_t *)(scanline + x);
-            *(uint32_t *)data = ((u & 0xFF00FF00U) >> 8) | ((u & 0x00FF00FFU) << 8);
+            uint32_t u = *(uint32_t*)(scanline + x); // Two pixels
+            *(uint32_t *)data = ((u & 0xFF00FF00U) >> 8) | ((u & 0x00FF00FFU) << 8); // Big Endian to Little Endian ?
             data += 2;
             x += 2;
           }
-          while (x < endX)
-            *data++ = __builtin_bswap16(scanline[x++]);
-          //printf("\r\n x= %d \r\n",displayXOffset + i->x);
+
+          while (x < endX) {
+            *data = __builtin_bswap16(scanline[x]);
+            x += 1;
+            data += 1;
+          }
           
-          // printf("If  diffing,  need to maintain prev frame");
           memcpy(prevScanline + i->x, scanline + i->x, (endX - i->x) * FRAMEBUFFER_BYTESPERPIXEL);
         }
 
         spi_commit_task(loop, task);
       }
+    }
 
     // Remember where in the command queue this frame ends, to keep track of the SPI thread's progress over it
     if (bytesTransferred > 0)

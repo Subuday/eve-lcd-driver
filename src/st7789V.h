@@ -5,4 +5,8 @@
 #define GPIO_TFT_BACKLIGHT 24 // TODO: Fix GPIO number
 #define GPIO_TFT_RESET_PIN 27
 
+#define DISPLAY_SET_CURSOR_X 0x2A
+#define DISPLAY_SET_CURSOR_Y 0x2B
+#define DISPLAY_WRITE_PIXELS 0x2C
+
 void init_st7789V();
