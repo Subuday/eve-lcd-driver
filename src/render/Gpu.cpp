@@ -57,11 +57,12 @@ void Gpu::init() {
 
 int Gpu::countChangedPixels(uint16_t *framebuffer, uint16_t *prevFramebuffer) {
   int changedPixels = 0;
-  for (int y = 0; y < gpuFrameHeight; ++y)
-  {
-    for (int x = 0; x < gpuFrameWidth; ++x)
-      if (framebuffer[x] != prevFramebuffer[x])
-        ++changedPixels;
+  for (int y = 0; y < gpuFrameHeight; ++y) {
+    for (int x = 0; x < gpuFrameWidth; ++x) {
+      if (framebuffer[x] != prevFramebuffer[x]) {
+        changedPixels += 1;
+      }
+    }
 
     framebuffer += gpuFramebufferScanlineStrideBytes >> 1;
     prevFramebuffer += gpuFramebufferScanlineStrideBytes >> 1;
