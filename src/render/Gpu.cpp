@@ -238,6 +238,14 @@ void Gpu::postDisplayXWindowUpdate(spi_loop* loop, uint16_t start, uint16_t end)
 }
 
 void Gpu::post(uint16_t* buffer) {
+    uint16_t rotatedBuffer[320][240];
+    for (int i = 0; i < 240; ++i) {
+        for (int j = 0; j < 320; ++j) {
+            rotatedBuffer[j][i] = buffer[(239 - i) * 320 + (319 - j)];
+        }
+    }
+	buffer = &rotatedBuffer[0][0];
+
     // memcpy(framebuffer[0], buffer, gpuFramebufferSizeBytes);
 
     // printf("All initialized, now running main loop...\n");
