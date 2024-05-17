@@ -11,7 +11,7 @@ void Vsync::stop() {
 
 void Vsync::run() {
     while (!isCancelled.load()) {
-        this_thread::sleep_for(chrono::milliseconds(32));
+        this_thread::sleep_for(chrono::milliseconds(16));
 
         function<void()> cb;
         {
