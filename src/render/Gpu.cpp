@@ -80,8 +80,8 @@ void Gpu::createSpans(Span*& head, uint16_t* framebuffer, uint16_t* prevFramebuf
   int scanlineInc = interlacedDiff ? gpuFramebufferScanlineStrideBytes : (gpuFramebufferScanlineStrideBytes>>1);
   int scanlineEndInc = scanlineInc - gpuFrameWidth;
   
-  uint16_t *scanline = framebuffer + y*(gpuFramebufferScanlineStrideBytes>>1);
-  uint16_t *prevScanline = prevFramebuffer + y*(gpuFramebufferScanlineStrideBytes>>1); // (same scanline from previous frame, not preceding scanline)
+  uint16_t* scanline = framebuffer + y*(gpuFramebufferScanlineStrideBytes>>1);
+  uint16_t* prevScanline = prevFramebuffer + y*(gpuFramebufferScanlineStrideBytes>>1); // (same scanline from previous frame, not preceding scanline)
 
   while(y < gpuFrameHeight) {
     uint16_t *scanlineStart = scanline;
@@ -90,7 +90,13 @@ void Gpu::createSpans(Span*& head, uint16_t* framebuffer, uint16_t* prevFramebuf
       uint16_t *spanStart;
       uint16_t *spanEnd;
 
-      if (scanline + 1 < scanlineEnd) {
+      // if (scanline + 1 < scanlineEnd) {
+        if ((uintptr_t)prevScanline % sizeof(uint32_t) == 0) {
+          // printf("Scanline is aligned to 4 bytes %d\n", (uintptr_t)prevScanline);
+        } else {
+          // printf("Scanline is not aligned to 4 bytes %d\n", (uintptr_t) prevScanline);
+        }
+
         uint32_t diff = (*(uint32_t *)scanline) ^ (*(uint32_t *)prevScanline);
 
         if (diff == 0) {  // Both 1st and 2nd pixels are the same
@@ -118,32 +124,32 @@ void Gpu::createSpans(Span*& head, uint16_t* framebuffer, uint16_t* prevFramebuf
         prevScanline += 2;
 
         // We've found a start of a span of different pixels on this scanline, now find where this span ends
-        while(scanline < scanlineEnd) {
-          bool arePixelsDifferent = (*scanline != *prevScanline);
-          scanline += 1;
-          prevScanline += 1;
+        // while(scanline < scanlineEnd) {
+        //   bool arePixelsDifferent = (*scanline != *prevScanline);
+        //   scanline += 1;
+        //   prevScanline += 1;
 
-          if (arePixelsDifferent) {
-            spanEnd = scanline;
-            numConsecutiveUnchangedPixels = 0;
-          } else {
-            numConsecutiveUnchangedPixels += 1;
-            if (numConsecutiveUnchangedPixels > SPAN_MERGE_THRESHOLD) {
-              break;
-            }
-          }
-        }
-      } else { // handle the single last pixel on the row
-        bool arePixelsDifferent = (*scanline != *prevScanline);
+        //   if (arePixelsDifferent) {
+        //     spanEnd = scanline;
+        //     numConsecutiveUnchangedPixels = 0;
+        //   } else {
+        //     numConsecutiveUnchangedPixels += 1;
+        //     if (numConsecutiveUnchangedPixels > SPAN_MERGE_THRESHOLD) {
+        //       break;
+        //     }
+        //   }
+        // }
+      // } else { // handle the single last pixel on the row
+      //   bool arePixelsDifferent = (*scanline != *prevScanline);
 
-        if (arePixelsDifferent) {
-          spanStart = scanline;
-          spanEnd = scanline  + 1;
-        }
+      //   if (arePixelsDifferent) {
+      //     spanStart = scanline;
+      //     spanEnd = scanline  + 1;
+      //   }
 
-        scanline += 1;
-        prevScanline += 1;
-      }
+      //   scanline += 1;
+      //   prevScanline += 1;
+      // }
 
       // Submit the span update task
       Span *span = spans + numSpans;
@@ -371,7 +377,7 @@ void Gpu::post(uint16_t* buffer) {
     const double tooMuchToUpdateUsecs = timesliceToUseForScreenUpdates / desiredTargetFps; // If updating the current and new frame takes too many frames worth of allotted time, drop to interlacing.
 
     int numChangedPixels = framebufferHasNewChangedPixels ? countChangedPixels(framebuffer[0], framebuffer[1]) : 0;
-    printf("Number of changed pixels, %d\n", numChangedPixels);
+    // printf("Number of changed pixels, %d\n", numChangedPixels);
 
     uint32_t bytesToSend = numChangedPixels * SPI_BYTESPERPIXEL + (DISPLAY_DRAWABLE_HEIGHT << 1);
     interlacedUpdate = ((bytesToSend + spiTaskMemory->spiBytesQueued) * spiUsecsPerByte > tooMuchToUpdateUsecs); // Decide whether to do interlacedUpdate - only updates half of the screen
@@ -448,22 +454,25 @@ void Gpu::post(uint16_t* buffer) {
           int x = i->x;
 
           while (x < endX && (x % 2 != 0)) {
-            // Big Endian to Little Endian ?
-            *data = __builtin_bswap16(scanline[x]);
+            uint16_t pixel = __builtin_bswap16(scanline[x]); // to big endian
+            memcpy(data, &pixel, sizeof(uint16_t));
             data += 1;
             x += 1;
           }
 
           while (x < (endX & ~1U))
           {
-            uint32_t u = *(uint32_t*)(scanline + x); // Two pixels
-            *(uint32_t *)data = ((u & 0xFF00FF00U) >> 8) | ((u & 0x00FF00FFU) << 8); // Big Endian to Little Endian ?
+            uint32_t twoPixels; // = *(uint32_t*) (scanline + x);
+            memcpy(&twoPixels, scanline + x, sizeof(uint32_t));
+            twoPixels = ((twoPixels & 0xFF00FF00U) >> 8) | ((twoPixels & 0x00FF00FFU) << 8);
+            memcpy(data, &twoPixels, sizeof(uint32_t)); 
             data += 2;
             x += 2;
           }
 
           while (x < endX) {
-            *data = __builtin_bswap16(scanline[x]);
+            uint16_t pixel = __builtin_bswap16(scanline[x]); // to big endian
+            memcpy(data, &pixel, sizeof(uint16_t));
             x += 1;
             data += 1;
           }
